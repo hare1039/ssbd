@@ -4,9 +4,14 @@ onetbb/2021.3.0@
 poco/1.11.2@
 leveldb/1.23@
 rocksdb/6.20.3@
+openssl/1.1.1q@
 
 [options]
 boost:shared=False
+poco:enable_data_mysql=False
+poco:enable_data_odbc=False
+poco:enable_data_postgresql=False
+poco:enable_mongodb=False
 
 [generators]
 cmake

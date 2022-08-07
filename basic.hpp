@@ -4,15 +4,17 @@
 
 #include "scope_exit.hpp"
 
-#if defined(__GNUC__)
+#include <boost/predef/compiler.h>
+
+#if BOOST_COMP_GNUC
     // disable false positive warning in gcc12 => https://bugzilla.redhat.com/show_bug.cgi?id=2047428
     #pragma GCC diagnostic ignored "-Wrestrict"
 #endif
-
 #include <boost/beast/core.hpp>
-#if defined(__GNUC__)
+#if BOOST_COMP_GNUC
     #pragma GCC diagnostic pop
 #endif
+
 
 #include <boost/beast/http.hpp>
 #include <boost/beast/version.hpp>
@@ -26,12 +28,13 @@
 #include <boost/log/trivial.hpp>
 #include <boost/log/core.hpp>
 
-#if defined(__clang__)
+#if BOOST_COMP_CLANG
     #pragma clang diagnostic push
     #pragma clang diagnostic ignored "-Wunknown-warning-option"
+    #pragma clang diagnostic ignored "-Wdeprecated-copy"
 #endif
 #include <boost/log/expressions.hpp>
-#if defined(__clang__)
+#if BOOST_COMP_CLANG
     #pragma clang diagnostic pop
 #endif
 
@@ -57,9 +60,19 @@
 
 #include <boost/filesystem.hpp>
 
-#pragma GCC diagnostic ignored "-Wunused-result"
+#if BOOST_COMP_GNUC
+    #pragma GCC diagnostic ignored "-Wunused-result"
+#elif BOOST_COMP_CLANG
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wunused-parameter"
+    #pragma clang diagnostic ignored "-Wc++11-narrowing"
+#endif
 #include <boost/process.hpp>
-#pragma GCC diagnostic pop
+#if BOOST_COMP_GNUC
+    #pragma GCC diagnostic pop
+#elif BOOST_COMP_CLANG
+    #pragma clang diagnostic pop
+#endif
 
 #include <boost/optional.hpp>
 
