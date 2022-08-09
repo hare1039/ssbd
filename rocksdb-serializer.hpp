@@ -12,6 +12,7 @@
 #include <memory>
 #include <cstring>
 #include <array>
+#include <bitset>
 #include <tuple>
 #include <algorithm>
 #include <random>
@@ -38,17 +39,35 @@ void hash_range(std::size_t& seed, It first, It last)
 } // namespace
 
 
-using unit_t = std::uint8_t;
+using unit_t = char; // exp
+static_assert(sizeof(char) == 8/8);
 
 // key = [32] byte main key // sha256 bit
 using key_t = std::array<unit_t, 256 / 8 / sizeof(unit_t)>;
 enum class msg_t: unit_t
 {
-    err = 0,
-    ack = 1,
-    get = 2,
-    merge = 4,
+    err = 0b00000000,
+    ack = 0b00000001,
+    get = 0b00000010,
+    merge_ack_commit     = 0b00001000,
+    merge_request_commit = 0b00001001,
+    merge_vote_agree     = 0b00001010,
+    merge_vote_abort     = 0b00001011,
+    merge_execute_commit = 0b00001100,
+    merge_rollback_commit= 0b00001101,
 };
+
+auto operator << (std::ostream &os, msg_t const& msg) -> std::ostream&
+{
+    using under_t = std::underlying_type<msg_t>::type;
+    std::bitset<sizeof(under_t) * 8> m (static_cast<char>(msg));
+    os << m;
+    return os;
+}
+
+bool is_merge_request(msg_t msg) {
+    return static_cast<unit_t>(msg) & 0b00001000;
+}
 
 template<typename Integer>
 auto hton(Integer i) -> Integer
@@ -117,14 +136,17 @@ struct packet_header
 
         // |blockid|
         std::memcpy(std::addressof(blockid), pos, sizeof(blockid));
+        pos += sizeof(blockid);
         blockid = ntoh(blockid);
 
         // |position|
         std::memcpy(std::addressof(position), pos, sizeof(position));
+        pos += sizeof(position);
         position = ntoh(position);
 
         // |datasize|
         std::memcpy(std::addressof(datasize), pos, sizeof(datasize));
+        pos += sizeof(datasize);
         datasize = ntoh(datasize);
     }
 
@@ -176,11 +198,12 @@ struct packet_header_key_compare
 
 auto operator << (std::ostream &os, packet_header const& pd) -> std::ostream&
 {
-    os << "[t=" << static_cast<int>(pd.type) << "|k=";
+    os << "[t=" << pd.type << "|k=";
     for (key_t::value_type v: pd.uuid)
         os << std::hex << static_cast<int>(v);
     os << ",blkid=" << std::hex << pd.blockid;
-    os << "|d=" << pd.datasize << "]";
+    os << ",position=" << std::hex << pd.position;
+    os << "|datasize=" << pd.datasize << "]";
     return os;
 }
 
@@ -222,6 +245,13 @@ struct packet
         unit_t* pos = header.dump(r->data());
         data.dump(pos);
 
+        return r;
+    }
+
+    auto serialize_header() -> std::shared_ptr<std::vector<unit_t>>
+    {
+        auto r = std::make_shared<std::vector<unit_t>>(packet_header::bytesize);
+        header.dump(r->data());
         return r;
     }
 };

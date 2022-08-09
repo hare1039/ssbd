@@ -12,6 +12,8 @@ poco:enable_data_mysql=False
 poco:enable_data_odbc=False
 poco:enable_data_postgresql=False
 poco:enable_mongodb=False
+boost:shared=False
+onetbb:shared=False
 
 [generators]
 cmake

@@ -1,5 +1,6 @@
 #include "basic.hpp"
-#include "serializer.hpp"
+#include "rocksdb-serializer.hpp"
+#include "rawblocks.hpp"
 
 #include <boost/program_options.hpp>
 #include <boost/log/trivial.hpp>
@@ -68,9 +69,19 @@ public:
 
                     switch (pack->header.type)
                     {
-                    case rocksdb_pack::msg_t::merge:
-                        BOOST_LOG_TRIVIAL(debug) << "merge " << pack->header;
-                        self->start_read_body_and_merge(pack);
+                    case rocksdb_pack::msg_t::merge_request_commit:
+                        BOOST_LOG_TRIVIAL(debug) << "merge_request_commit " << pack->header;
+                        self->start_check_merge(pack);
+                        break;
+
+                    case rocksdb_pack::msg_t::merge_execute_commit:
+                        BOOST_LOG_TRIVIAL(debug) << "merge_execute_commit " << pack->header;
+                        self->start_execute_commit(pack);
+                        break;
+
+                    case rocksdb_pack::msg_t::merge_rollback_commit:
+                        BOOST_LOG_TRIVIAL(debug) << "merge_rollback_commit " << pack->header;
+                        self->start_read_header();
                         break;
 
                     case rocksdb_pack::msg_t::get:
@@ -80,19 +91,12 @@ public:
                         break;
 
                     case rocksdb_pack::msg_t::err:
-                    {
-                        BOOST_LOG_TRIVIAL(error) << "packet error" << pack->header;
-                        rocksdb_pack::packet_pointer resp = std::make_shared<rocksdb_pack::packet>();
-                        resp->header = pack->header;
-                        resp->header.type = rocksdb_pack::msg_t::err;
-                        self->start_write_socket(resp);
-                        self->start_read_header();
-                        break;
-                    }
-
                     case rocksdb_pack::msg_t::ack:
+                    case rocksdb_pack::msg_t::merge_ack_commit:
+                    case rocksdb_pack::msg_t::merge_vote_agree:
+                    case rocksdb_pack::msg_t::merge_vote_abort:
                     {
-                        BOOST_LOG_TRIVIAL(error) << "server should not get ack. error: " << pack->header;
+                        BOOST_LOG_TRIVIAL(error) << "server should not get (" << pack->header.type << "). error: " << pack->header;
                         rocksdb_pack::packet_pointer resp = std::make_shared<rocksdb_pack::packet>();
                         resp->header = pack->header;
                         resp->header.type = rocksdb_pack::msg_t::err;
@@ -110,9 +114,9 @@ public:
             });
     }
 
-    void start_read_body_and_merge(rocksdb_pack::packet_pointer pack)
+    void start_check_merge(rocksdb_pack::packet_pointer pack)
     {
-        BOOST_LOG_TRIVIAL(trace) << "start_read_body_and_merge";
+        BOOST_LOG_TRIVIAL(trace) << "start_check_merge " << pack->header;
         auto read_buf = std::make_shared<std::vector<rocksdb_pack::unit_t>>(pack->header.datasize);
         net::async_read(
             socket_,
@@ -121,12 +125,55 @@ public:
                 if (not ec)
                 {
                     pack->data.parse(length, read_buf->data());
-                    //self->start_merge(pack);
-                    self->start_db_write(pack);
+
+                    rocksdb_pack::packet_pointer resp = std::make_shared<rocksdb_pack::packet>();
+                    resp->header = pack->header;
+
+                    std::string const key = pack->header.as_string();
+                    rocksdb_pack::rawblocks rb;
+
+                    resp->header.type = rocksdb_pack::msg_t::merge_vote_agree;
+                    if (rb.bind(self->db_, key).ok())
+                    {
+                        rocksdb_pack::rawblocks::versionint_t requested_version;
+                        std::memcpy(&requested_version, pack->data.buf.data(), sizeof(requested_version));
+                        requested_version = rocksdb_pack::ntoh(requested_version);
+                        if (rb.version() > requested_version)
+                            resp->header.type = rocksdb_pack::msg_t::merge_vote_abort;
+                    }
+                    resp->data.buf = pack->data.buf;
+
+                    self->start_write_socket(resp);
                     self->start_read_header();
                 }
                 else
-                    BOOST_LOG_TRIVIAL(error) << "start_read_body_and_merge: " << ec.message();
+                    BOOST_LOG_TRIVIAL(error) << "start_check_merge: " << ec.message();
+            });
+    }
+
+    void start_execute_commit(rocksdb_pack::packet_pointer pack)
+    {
+        BOOST_LOG_TRIVIAL(trace) << "start_execute_commit " << pack->header;
+        auto read_buf = std::make_shared<std::string>(pack->header.datasize, 0);
+        net::async_read(
+            socket_,
+            net::buffer(read_buf->data(), read_buf->size()),
+            [self=shared_from_this(), read_buf, pack] (boost::system::error_code ec, std::size_t length) {
+                if (not ec)
+                {
+                    pack->data.parse(length, read_buf->data());
+                    std::string const key = pack->header.as_string();
+                    self->db_->Put(rocksdb::WriteOptions(), key, *read_buf);
+
+                    rocksdb_pack::packet_pointer resp = std::make_shared<rocksdb_pack::packet>();
+                    resp->header = pack->header;
+                    resp->header.type = rocksdb_pack::msg_t::ack;
+
+                    self->start_write_socket(resp);
+                    self->start_read_header();
+                }
+                else
+                    BOOST_LOG_TRIVIAL(error) << "start_execute_commit: " << ec.message();
             });
     }
 
@@ -155,13 +202,14 @@ public:
         net::post(
             io_context_,
             [self=shared_from_this(), pack] {
-                std::string value;
-                self->db_->Get(rocksdb::ReadOptions(), pack->header.as_string(), &value);
+                rocksdb_pack::rawblocks rb;
+                rb.bind(self->db_, pack->header.as_string());
 
                 rocksdb_pack::packet_pointer resp = std::make_shared<rocksdb_pack::packet>();
                 resp->header = pack->header;
                 resp->header.type = rocksdb_pack::msg_t::ack;
-                std::copy(value.begin(), value.end(), std::back_inserter(resp->data.buf));
+
+                rb.read(pack->header.position, std::back_inserter(resp->data.buf), resp->header.datasize);
 
                 self->start_write_socket(resp);
             });
