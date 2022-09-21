@@ -1,7 +1,7 @@
-FROM gcc:12
+FROM gcc:12 as builder
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends python3-pip make cmake && \
+    apt-get install -y --no-install-recommends python3-pip make cmake ninja-build && \
     pip3 install conan
 
 RUN conan profile new default --detect &&\
@@ -20,5 +20,12 @@ ARG debug
 
 RUN cd /final && \
     bash -c 'echo debug=$debug; if [[ -z "$debug" ]]; then make release; else make debug; fi'
+
+RUN strip /final/build/bin/client && strip /final/build/bin/run
+
+FROM busybox:glibc
+
+COPY --from=builder /final/build/bin/client /final/build/bin/client
+COPY --from=builder /final/build/bin/run /final/build/bin/run
 
 ENTRYPOINT ["/final/build/bin/run", "--listen", "12000"]

@@ -138,8 +138,9 @@ public:
                         rocksdb_pack::rawblocks::versionint_t requested_version;
                         std::memcpy(&requested_version, pack->data.buf.data(), sizeof(requested_version));
                         requested_version = rocksdb_pack::ntoh(requested_version);
-                        if (rb.version() > requested_version)
+                        if (rb.version() > requested_version && false /*debug*/)
                             resp->header.type = rocksdb_pack::msg_t::merge_vote_abort;
+                        BOOST_LOG_TRIVIAL(debug) << "local: " << rb.version() << " req: " << requested_version;
                     }
                     resp->data.buf = pack->data.buf;
 
@@ -179,6 +180,7 @@ public:
 
     void start_db_write(rocksdb_pack::packet_pointer pack)
     {
+        BOOST_LOG_TRIVIAL(trace) << "start_db_write";
         net::post(
             io_context_,
             [self=shared_from_this(), pack] {
@@ -199,6 +201,7 @@ public:
 
     void start_db_read(rocksdb_pack::packet_pointer pack)
     {
+        BOOST_LOG_TRIVIAL(trace) << "start_db_read";
         net::post(
             io_context_,
             [self=shared_from_this(), pack] {
@@ -217,8 +220,15 @@ public:
 
     void start_write_socket(rocksdb_pack::packet_pointer pack)
     {
-        BOOST_LOG_TRIVIAL(trace) << "write";
+        BOOST_LOG_TRIVIAL(trace) << "start_write_socket: " << pack->header;
         auto buf_pointer = pack->serialize();
+
+        std::stringstream ss;
+        ss << "[ ";
+        for (int i : *buf_pointer)
+            ss << i << " ";
+        BOOST_LOG_TRIVIAL(trace) << ss.str() << "]";
+
         net::async_write(
             socket_,
             net::buffer(buf_pointer->data(), buf_pointer->size()),

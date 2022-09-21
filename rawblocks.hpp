@@ -41,7 +41,8 @@ public:
 
     template<typename OutputIterator>
     void read(std::size_t logic_position, OutputIterator ot, std::size_t size) {
-        std::copy_n(std::next(buf_.begin(), logic_position + headersize()), size, ot);
+        std::copy_n(std::next(buf_.begin(), logic_position + headersize()),
+                    std::min(buf_.size() - headersize() - logic_position, size), ot);
     }
 
     void move(std::string && newbuf) {
