@@ -3,6 +3,8 @@
 
 #include <boost/asio.hpp>
 
+#include <fmt/core.h>
+
 #include <algorithm>
 #include <iostream>
 
@@ -24,6 +26,27 @@ auto record(Function &&f, Args &&... args) -> long int
     auto const now = std::chrono::high_resolution_clock::now();
     auto relativetime = std::chrono::duration_cast<std::chrono::nanoseconds>(now - start).count();
     return relativetime;
+}
+
+template<typename Iterator>
+void stats(Iterator start, Iterator end, std::string const memo = "")
+{
+    int const size = std::distance(start, end);
+
+    double sum = std::accumulate(start, end, 0.0);
+    double mean = sum / size, var = 0;
+
+    std::map<int, int> dist;
+    for (; start != end; start++)
+    {
+        dist[(*start)/1000000]++;
+        var += std::pow((*start) - mean, 2);
+    }
+
+    var /= size;
+    BOOST_LOG_TRIVIAL(info) << fmt::format("{0} avg={1:.3f} sd={2:.3f}", memo, mean, std::sqrt(var));
+    for (auto && [time, count] : dist)
+        BOOST_LOG_TRIVIAL(info) << fmt::format("{0} {1}: {2}", memo, time, count);
 }
 
 void write(tcp::socket &s, int pos, std::vector<rocksdb_pack::unit_t>& buf)
@@ -145,18 +168,47 @@ int main()
 
     //record([&](){ ; }, "base");
 
-    std::vector<rocksdb_pack::unit_t> buf(512);
+    std::vector<rocksdb_pack::unit_t> buf(4096);
     using ulli = unsigned long long int;
-    ulli c = 0;
-    for (int i=0; i<10000; i++)
-        c += record([&](){ read(s, i); });
 
-    BOOST_LOG_TRIVIAL(info) << "read " << c / 10000 << "\n";
-
-    c = 0;
+    std::list<double> records;
     for (int i=0; i<10000; i++)
-        c += record([&](){ write(s, i, buf); });
-    BOOST_LOG_TRIVIAL(info) << "write " << c / 10000 << "\n";
+        records.push_back(record([&](){ read(s, i); }));
+
+    stats(records.begin(), records.end(), "read");
+
+    records.clear();
+    for (int i=0; i<10000; i++)
+        records.push_back(record([&](){ write(s, i, buf); }));
+    stats(records.begin(), records.end(), "write");
+
+    records.clear();
+    for (int i=0; i<10000; i++)
+        records.push_back(
+            record(
+                [&](){
+                    boost::asio::io_context io_context;
+                    tcp::socket s(io_context);
+                    tcp::resolver resolver(io_context);
+                    boost::asio::connect(s, resolver.resolve("ssbd-2", "12000"));
+                    read(s, i);
+                }));
+
+    stats(records.begin(), records.end(), "readnewconn");
+
+    records.clear();
+    for (int i=0; i<10000; i++)
+        records.push_back(
+            record(
+                [&](){
+                    boost::asio::io_context io_context;
+                    tcp::socket s(io_context);
+                    tcp::resolver resolver(io_context);
+                    boost::asio::connect(s, resolver.resolve("ssbd-2", "12000"));
+
+                    write(s, i, buf);
+                }));
+    stats(records.begin(), records.end(), "writenewconn");
 
     return EXIT_SUCCESS;
 }
