@@ -269,6 +269,7 @@ public:
             [this] (boost::system::error_code const& error, tcp::socket socket) {
                 if (not error)
                 {
+                    socket.set_option(tcp::no_delay(true));
                     auto accepted = std::make_shared<tcp_connection>(
                         io_context_,
                         std::move(socket),
