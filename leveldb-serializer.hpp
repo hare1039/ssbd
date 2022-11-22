@@ -1,10 +1,8 @@
 #pragma once
-#ifndef CPP_ROCKSDB_SERIALIZER_OBJECTPACK_HPP__
-#define CPP_ROCKSDB_SERIALIZER_OBJECTPACK_HPP__
+#ifndef CPP_LEVELDB_SERIALIZER_OBJECTPACK_HPP__
+#define CPP_LEVELDB_SERIALIZER_OBJECTPACK_HPP__
 
 #include <arpa/inet.h>
-
-//#include <boost/functional/hash.hpp>
 
 #include <ios>
 #include <iostream>
@@ -17,7 +15,7 @@
 #include <algorithm>
 #include <random>
 
-namespace rocksdb_pack
+namespace leveldb_pack
 {
 
 namespace
@@ -260,4 +258,4 @@ using packet_pointer = std::shared_ptr<packet>;
 
 } // namespace pack
 
-#endif // CPP_ROCKSDB_SERIALIZER_OBJECTPACK_HPP__
+#endif // CPP_LEVELDB_SERIALIZER_OBJECTPACK_HPP__

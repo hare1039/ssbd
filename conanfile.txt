@@ -1,5 +1,5 @@
 [requires]
-boost/1.79.0@
+boost/1.80.0@
 onetbb/2021.3.0@
 poco/1.11.2@
 leveldb/1.23@

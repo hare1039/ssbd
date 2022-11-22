@@ -1,7 +1,7 @@
 FROM gcc:12 as builder
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends python3-pip make cmake ninja-build && \
+    apt-get install -y --no-install-recommends python3-pip make cmake ninja-build ccache && \
     pip3 install conan
 
 RUN conan profile new default --detect &&\
@@ -18,8 +18,9 @@ ADD . /final
 
 ARG debug
 
-RUN cd /final && \
-    bash -c 'echo debug=$debug; if [[ -z "$debug" ]]; then make release; else make debug; fi'
+RUN --mount=type=cache,target=/ccache \
+    cd /final && \
+    CCACHE_DIR=/ccache bash -c 'echo debug=$debug; if [[ -z "$debug" ]]; then make release; else make debug; fi'
 
 RUN strip /final/build/bin/client && strip /final/build/bin/run
 

@@ -5,9 +5,9 @@
 
 #include "basic.hpp"
 
-#include <rocksdb/db.h>
+#include <leveldb/db.h>
 
-namespace rocksdb_pack
+namespace leveldb_pack
 {
 
 class rawblocks
@@ -49,15 +49,15 @@ public:
         buf_ = std::move(newbuf);
     }
 
-    auto bind(std::shared_ptr<rocksdb::DB> db, std::string const& key) -> rocksdb::Status {
-        return db->Get(rocksdb::ReadOptions(), key, &buf_);
+    auto bind(std::shared_ptr<leveldb::DB> db, std::string const& key) -> leveldb::Status {
+        return db->Get(leveldb::ReadOptions(), key, &buf_);
     }
 
-    auto flush(std::shared_ptr<rocksdb::DB> db, std::string const& key) -> rocksdb::Status {
-        return db->Put(rocksdb::WriteOptions(), key, buf_);
+    auto flush(std::shared_ptr<leveldb::DB> db, std::string const& key) -> leveldb::Status {
+        return db->Put(leveldb::WriteOptions(), key, buf_);
     }
 };
 
-}; // namespace rocksdb_pack
+}; // namespace leveldb_pack
 
 #endif // RAWBLOCKS_HPP__

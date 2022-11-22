@@ -1,5 +1,5 @@
 #include "basic.hpp"
-#include "rocksdb-serializer.hpp"
+#include "leveldb-serializer.hpp"
 
 #include <boost/asio.hpp>
 
@@ -49,17 +49,17 @@ void stats(Iterator start, Iterator end, std::string const memo = "")
         BOOST_LOG_TRIVIAL(info) << fmt::format("{0} {1}: {2}", memo, time, count);
 }
 
-void write(tcp::socket &s, int pos, std::vector<rocksdb_pack::unit_t>& buf)
+void write(tcp::socket &s, int pos, std::vector<leveldb_pack::unit_t>& buf)
 {
     auto const p1 = std::chrono::high_resolution_clock::now();
     auto vx = std::chrono::duration_cast<std::chrono::seconds>(p1.time_since_epoch()).count();
     std::uint32_t version = static_cast<std::uint32_t>(vx);
-    version = rocksdb_pack::hton(version);
+    version = leveldb_pack::hton(version);
 
     { // send merge_request_commit;
-        rocksdb_pack::packet_pointer ptr = std::make_shared<rocksdb_pack::packet>();
-        ptr->header.type = rocksdb_pack::msg_t::merge_request_commit;
-        ptr->header.uuid = rocksdb_pack::key_t{
+        leveldb_pack::packet_pointer ptr = std::make_shared<leveldb_pack::packet>();
+        ptr->header.type = leveldb_pack::msg_t::merge_request_commit;
+        ptr->header.uuid = leveldb_pack::key_t{
             7, 8, 7, 8, 7, 8, 7, 8,
             7, 8, 7, 8, 7, 8, 7, 8,
             7, 8, 7, 8, 7, 8, 7, 8,
@@ -69,7 +69,7 @@ void write(tcp::socket &s, int pos, std::vector<rocksdb_pack::unit_t>& buf)
         ptr->header.blockid = pos / 4096;
         ptr->header.position = pos % 4096;
 
-        ptr->data.buf = std::vector<rocksdb_pack::unit_t> (sizeof(version));
+        ptr->data.buf = std::vector<leveldb_pack::unit_t> (sizeof(version));
         std::memcpy(ptr->data.buf.data(), &version, sizeof(version));
 
         auto buf = ptr->serialize();
@@ -77,15 +77,15 @@ void write(tcp::socket &s, int pos, std::vector<rocksdb_pack::unit_t>& buf)
     } // send merge_request_commit;
 
     { // read resp
-        rocksdb_pack::packet_pointer resp = std::make_shared<rocksdb_pack::packet>();
-        std::vector<rocksdb_pack::unit_t> headerbuf(rocksdb_pack::packet_header::bytesize);
+        leveldb_pack::packet_pointer resp = std::make_shared<leveldb_pack::packet>();
+        std::vector<leveldb_pack::unit_t> headerbuf(leveldb_pack::packet_header::bytesize);
 
         boost::asio::read(s, boost::asio::buffer(headerbuf.data(), headerbuf.size()));
         resp->header.parse(headerbuf.data());
 
         //BOOST_LOG_TRIVIAL(info) << "put resp " << resp->header;
 
-        std::vector<rocksdb_pack::unit_t> bodybuf(resp->header.datasize);
+        std::vector<leveldb_pack::unit_t> bodybuf(resp->header.datasize);
 
         boost::asio::read(s, boost::asio::buffer(bodybuf.data(), bodybuf.size()));
         resp->data.parse(resp->header.datasize, bodybuf.data());
@@ -93,9 +93,9 @@ void write(tcp::socket &s, int pos, std::vector<rocksdb_pack::unit_t>& buf)
 
 
     { // send merge_execute_commit;
-        rocksdb_pack::packet_pointer ptr = std::make_shared<rocksdb_pack::packet>();
-        ptr->header.type = rocksdb_pack::msg_t::merge_execute_commit;
-        ptr->header.uuid = rocksdb_pack::key_t{
+        leveldb_pack::packet_pointer ptr = std::make_shared<leveldb_pack::packet>();
+        ptr->header.type = leveldb_pack::msg_t::merge_execute_commit;
+        ptr->header.uuid = leveldb_pack::key_t{
             7, 8, 7, 8, 7, 8, 7, 8,
             7, 8, 7, 8, 7, 8, 7, 8,
             7, 8, 7, 8, 7, 8, 7, 8,
@@ -105,7 +105,7 @@ void write(tcp::socket &s, int pos, std::vector<rocksdb_pack::unit_t>& buf)
         ptr->header.blockid = pos / 4096;
         ptr->header.position = pos % 4096;
 
-        ptr->data.buf = std::vector<rocksdb_pack::unit_t> (sizeof(version)+buf.size());
+        ptr->data.buf = std::vector<leveldb_pack::unit_t> (sizeof(version)+buf.size());
         std::memcpy(ptr->data.buf.data(), &version, sizeof(version));
 
         auto buf = ptr->serialize();
@@ -113,8 +113,8 @@ void write(tcp::socket &s, int pos, std::vector<rocksdb_pack::unit_t>& buf)
     } // send merge_execute_commit;
 
     { // read resp
-        rocksdb_pack::packet_pointer resp = std::make_shared<rocksdb_pack::packet>();
-        std::vector<rocksdb_pack::unit_t> headerbuf(rocksdb_pack::packet_header::bytesize);
+        leveldb_pack::packet_pointer resp = std::make_shared<leveldb_pack::packet>();
+        std::vector<leveldb_pack::unit_t> headerbuf(leveldb_pack::packet_header::bytesize);
         boost::asio::read(s, boost::asio::buffer(headerbuf.data(), headerbuf.size()));
 
         resp->header.parse(headerbuf.data());
@@ -124,9 +124,9 @@ void write(tcp::socket &s, int pos, std::vector<rocksdb_pack::unit_t>& buf)
 void read(tcp::socket &s, int pos)
 {
     { // send get
-        rocksdb_pack::packet_pointer ptr = std::make_shared<rocksdb_pack::packet>();
-        ptr->header.type = rocksdb_pack::msg_t::get;
-        ptr->header.uuid = rocksdb_pack::key_t{
+        leveldb_pack::packet_pointer ptr = std::make_shared<leveldb_pack::packet>();
+        ptr->header.type = leveldb_pack::msg_t::get;
+        ptr->header.uuid = leveldb_pack::key_t{
             7, 8, 7, 8, 7, 8, 7, 8,
             7, 8, 7, 8, 7, 8, 7, 8,
             7, 8, 7, 8, 7, 8, 7, 8,
@@ -141,8 +141,8 @@ void read(tcp::socket &s, int pos)
     } // send merge_execute_commit;
 
     { // read resp
-        rocksdb_pack::packet_pointer resp = std::make_shared<rocksdb_pack::packet>();
-        std::vector<rocksdb_pack::unit_t> headerbuf(rocksdb_pack::packet_header::bytesize);
+        leveldb_pack::packet_pointer resp = std::make_shared<leveldb_pack::packet>();
+        std::vector<leveldb_pack::unit_t> headerbuf(leveldb_pack::packet_header::bytesize);
         boost::asio::read(s, boost::asio::buffer(headerbuf.data(), headerbuf.size()));
 
         resp->header.parse(headerbuf.data());
@@ -168,8 +168,8 @@ int main()
 
     //record([&](){ ; }, "base");
 
-    std::vector<rocksdb_pack::unit_t> buf(4096);
-    using ulli = unsigned long long int;
+    std::vector<leveldb_pack::unit_t> buf(4096);
+    //using ulli = unsigned long long int;
 
     std::list<double> records;
     for (int i=0; i<10000; i++)

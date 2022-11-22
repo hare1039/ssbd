@@ -1,5 +1,5 @@
 #include "basic.hpp"
-#include "rocksdb-serializer.hpp"
+#include "leveldb-serializer.hpp"
 #include "rawblocks.hpp"
 
 #include <boost/program_options.hpp>
@@ -10,7 +10,7 @@
 #include <oneapi/tbb/concurrent_unordered_map.h>
 #include <oneapi/tbb/concurrent_queue.h>
 
-#include <rocksdb/db.h>
+#include <leveldb/db.h>
 
 #include <algorithm>
 #include <iostream>
@@ -22,13 +22,13 @@
 
 using net::ip::tcp;
 
-//class ssbd_merger : public rocksdb::AssociativeMergeOperator
+//class ssbd_merger : public leveldb::AssociativeMergeOperator
 //{
 //public:
 //    virtual
-//    bool Merge(rocksdb::Slice const& key,
-//               rocksdb::Slice const* existing_value,
-//               rocksdb::Slice const& value,
+//    bool Merge(leveldb::Slice const& key,
+//               leveldb::Slice const* existing_value,
+//               leveldb::Slice const& value,
 //               std::string* new_value,
 //               Logger* logger) const override = 0;
 //    {
@@ -43,12 +43,12 @@ class tcp_connection : public std::enable_shared_from_this<tcp_connection>
     net::io_context& io_context_;
     tcp::socket socket_;
     net::io_context::strand write_io_strand_;
-    std::shared_ptr<rocksdb::DB> db_;
+    std::shared_ptr<leveldb::DB> db_;
 
 public:
     using pointer = std::shared_ptr<tcp_connection>;
 
-    tcp_connection(net::io_context& io, tcp::socket socket, std::shared_ptr<rocksdb::DB> db):
+    tcp_connection(net::io_context& io, tcp::socket socket, std::shared_ptr<leveldb::DB> db):
         io_context_{io},
         socket_{std::move(socket)},
         write_io_strand_{io},
@@ -57,49 +57,49 @@ public:
     void start_read_header()
     {
         BOOST_LOG_TRIVIAL(trace) << "start_read_header";
-        auto read_buf = std::make_shared<std::array<rocksdb_pack::unit_t, rocksdb_pack::packet_header::bytesize>>();
+        auto read_buf = std::make_shared<std::array<leveldb_pack::unit_t, leveldb_pack::packet_header::bytesize>>();
         net::async_read(
             socket_,
             net::buffer(read_buf->data(), read_buf->size()),
             [self=shared_from_this(), read_buf] (boost::system::error_code ec, std::size_t /*length*/) {
                 if (not ec)
                 {
-                    rocksdb_pack::packet_pointer pack = std::make_shared<rocksdb_pack::packet>();
+                    leveldb_pack::packet_pointer pack = std::make_shared<leveldb_pack::packet>();
                     pack->header.parse(read_buf->data());
 
                     switch (pack->header.type)
                     {
-                    case rocksdb_pack::msg_t::merge_request_commit:
+                    case leveldb_pack::msg_t::merge_request_commit:
                         BOOST_LOG_TRIVIAL(debug) << "merge_request_commit " << pack->header;
                         self->start_check_merge(pack);
                         break;
 
-                    case rocksdb_pack::msg_t::merge_execute_commit:
+                    case leveldb_pack::msg_t::merge_execute_commit:
                         BOOST_LOG_TRIVIAL(debug) << "merge_execute_commit " << pack->header;
                         self->start_execute_commit(pack);
                         break;
 
-                    case rocksdb_pack::msg_t::merge_rollback_commit:
+                    case leveldb_pack::msg_t::merge_rollback_commit:
                         BOOST_LOG_TRIVIAL(debug) << "merge_rollback_commit " << pack->header;
                         self->start_read_header();
                         break;
 
-                    case rocksdb_pack::msg_t::get:
+                    case leveldb_pack::msg_t::get:
                         BOOST_LOG_TRIVIAL(debug) << "get " << pack->header;
                         self->start_db_read(pack);
                         self->start_read_header();
                         break;
 
-                    case rocksdb_pack::msg_t::err:
-                    case rocksdb_pack::msg_t::ack:
-                    case rocksdb_pack::msg_t::merge_ack_commit:
-                    case rocksdb_pack::msg_t::merge_vote_agree:
-                    case rocksdb_pack::msg_t::merge_vote_abort:
+                    case leveldb_pack::msg_t::err:
+                    case leveldb_pack::msg_t::ack:
+                    case leveldb_pack::msg_t::merge_ack_commit:
+                    case leveldb_pack::msg_t::merge_vote_agree:
+                    case leveldb_pack::msg_t::merge_vote_abort:
                     {
                         BOOST_LOG_TRIVIAL(error) << "server should not get (" << pack->header.type << "). error: " << pack->header;
-                        rocksdb_pack::packet_pointer resp = std::make_shared<rocksdb_pack::packet>();
+                        leveldb_pack::packet_pointer resp = std::make_shared<leveldb_pack::packet>();
                         resp->header = pack->header;
-                        resp->header.type = rocksdb_pack::msg_t::err;
+                        resp->header.type = leveldb_pack::msg_t::err;
                         self->start_write_socket(resp);
                         self->start_read_header();
                         break;
@@ -114,10 +114,10 @@ public:
             });
     }
 
-    void start_check_merge(rocksdb_pack::packet_pointer pack)
+    void start_check_merge(leveldb_pack::packet_pointer pack)
     {
         BOOST_LOG_TRIVIAL(trace) << "start_check_merge " << pack->header;
-        auto read_buf = std::make_shared<std::vector<rocksdb_pack::unit_t>>(pack->header.datasize);
+        auto read_buf = std::make_shared<std::vector<leveldb_pack::unit_t>>(pack->header.datasize);
         net::async_read(
             socket_,
             net::buffer(read_buf->data(), read_buf->size()),
@@ -126,20 +126,20 @@ public:
                 {
                     pack->data.parse(length, read_buf->data());
 
-                    rocksdb_pack::packet_pointer resp = std::make_shared<rocksdb_pack::packet>();
+                    leveldb_pack::packet_pointer resp = std::make_shared<leveldb_pack::packet>();
                     resp->header = pack->header;
 
                     std::string const key = pack->header.as_string();
-                    rocksdb_pack::rawblocks rb;
+                    leveldb_pack::rawblocks rb;
 
-                    resp->header.type = rocksdb_pack::msg_t::merge_vote_agree;
+                    resp->header.type = leveldb_pack::msg_t::merge_vote_agree;
                     if (rb.bind(self->db_, key).ok())
                     {
-                        rocksdb_pack::rawblocks::versionint_t requested_version;
+                        leveldb_pack::rawblocks::versionint_t requested_version;
                         std::memcpy(&requested_version, pack->data.buf.data(), sizeof(requested_version));
-                        requested_version = rocksdb_pack::ntoh(requested_version);
+                        requested_version = leveldb_pack::ntoh(requested_version);
                         if (rb.version() > requested_version && false /*debug*/)
-                            resp->header.type = rocksdb_pack::msg_t::merge_vote_abort;
+                            resp->header.type = leveldb_pack::msg_t::merge_vote_abort;
                         BOOST_LOG_TRIVIAL(debug) << "local: " << rb.version() << " req: " << requested_version;
                     }
                     resp->data.buf = pack->data.buf;
@@ -152,7 +152,7 @@ public:
             });
     }
 
-    void start_execute_commit(rocksdb_pack::packet_pointer pack)
+    void start_execute_commit(leveldb_pack::packet_pointer pack)
     {
         BOOST_LOG_TRIVIAL(trace) << "start_execute_commit " << pack->header;
         auto read_buf = std::make_shared<std::string>(pack->header.datasize, 0);
@@ -164,11 +164,11 @@ public:
                 {
                     pack->data.parse(length, read_buf->data());
                     std::string const key = pack->header.as_string();
-                    self->db_->Put(rocksdb::WriteOptions(), key, *read_buf);
+                    self->db_->Put(leveldb::WriteOptions(), key, *read_buf);
 
-                    rocksdb_pack::packet_pointer resp = std::make_shared<rocksdb_pack::packet>();
+                    leveldb_pack::packet_pointer resp = std::make_shared<leveldb_pack::packet>();
                     resp->header = pack->header;
-                    resp->header.type = rocksdb_pack::msg_t::ack;
+                    resp->header.type = leveldb_pack::msg_t::ack;
 
                     self->start_write_socket(resp);
                     self->start_read_header();
@@ -178,7 +178,7 @@ public:
             });
     }
 
-    void start_db_write(rocksdb_pack::packet_pointer pack)
+    void start_db_write(leveldb_pack::packet_pointer pack)
     {
         BOOST_LOG_TRIVIAL(trace) << "start_db_write";
         net::post(
@@ -188,29 +188,29 @@ public:
                 //resp->buf;
                 std::string const key = pack->header.as_string();
 
-                self->db_->Get(rocksdb::ReadOptions(), key, &value);
+                self->db_->Get(leveldb::ReadOptions(), key, &value);
                 std::copy(pack->data.buf.begin(), pack->data.buf.end(), std::next(value.begin(), pack->header.position));
-                self->db_->Put(rocksdb::WriteOptions(), key, value);
+                self->db_->Put(leveldb::WriteOptions(), key, value);
 
-                rocksdb_pack::packet_pointer resp = std::make_shared<rocksdb_pack::packet>();
+                leveldb_pack::packet_pointer resp = std::make_shared<leveldb_pack::packet>();
                 resp->header = pack->header;
-                resp->header.type = rocksdb_pack::msg_t::ack;
+                resp->header.type = leveldb_pack::msg_t::ack;
                 self->start_write_socket(resp);
             });
     }
 
-    void start_db_read(rocksdb_pack::packet_pointer pack)
+    void start_db_read(leveldb_pack::packet_pointer pack)
     {
         BOOST_LOG_TRIVIAL(trace) << "start_db_read";
         net::post(
             io_context_,
             [self=shared_from_this(), pack] {
-                rocksdb_pack::rawblocks rb;
+                leveldb_pack::rawblocks rb;
                 rb.bind(self->db_, pack->header.as_string());
 
-                rocksdb_pack::packet_pointer resp = std::make_shared<rocksdb_pack::packet>();
+                leveldb_pack::packet_pointer resp = std::make_shared<leveldb_pack::packet>();
                 resp->header = pack->header;
-                resp->header.type = rocksdb_pack::msg_t::ack;
+                resp->header.type = leveldb_pack::msg_t::ack;
 
                 rb.read(pack->header.position, std::back_inserter(resp->data.buf), resp->header.datasize);
 
@@ -218,7 +218,7 @@ public:
             });
     }
 
-    void start_write_socket(rocksdb_pack::packet_pointer pack)
+    void start_write_socket(leveldb_pack::packet_pointer pack)
     {
         BOOST_LOG_TRIVIAL(trace) << "start_write_socket: " << pack->header;
         auto buf_pointer = pack->serialize();
@@ -245,17 +245,17 @@ class tcp_server
 {
     net::io_context& io_context_;
     tcp::acceptor acceptor_;
-    std::shared_ptr<rocksdb::DB> db_;
+    std::shared_ptr<leveldb::DB> db_;
 
 public:
     tcp_server(net::io_context& io_context, net::ip::port_type port, char const * dbname)
         : io_context_(io_context),
           acceptor_(io_context, tcp::endpoint(tcp::v4(), port))
     {
-        rocksdb::DB* db;
-        rocksdb::Options options;
+        leveldb::DB* db;
+        leveldb::Options options;
         options.create_if_missing = true;
-        rocksdb::Status status = rocksdb::DB::Open(options, dbname, &db);
+        leveldb::Status status = leveldb::DB::Open(options, dbname, &db);
         if (not status.ok())
             BOOST_LOG_TRIVIAL(error) << status.ToString() << "\n";
 

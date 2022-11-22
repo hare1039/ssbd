@@ -1,4 +1,4 @@
-hosts=(ssbd-2 ssbd-3 ssbd-4)
+hosts=(ssbd-2)
 images=(hare1039/ssbd:0.0.1)
 
 for i in "${images[@]}"; do
